@@ -1,18 +1,12 @@
 import streamlit as st
-import openai
-import json
 import matplotlib.pyplot as plt
 
-# ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Travel Planner", layout="wide")
 
 st.title("✈️ AI Travel Planning Agent")
-st.caption("Generate realistic, city-specific travel itineraries with cost estimation")
+st.caption("Dynamic, destination-aware travel itineraries")
 
-# Load OpenAI key from Streamlit secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-
-# ---------------- INPUTS ----------------
+# -------- INPUTS --------
 with st.sidebar:
     st.header("Trip Details")
 
@@ -27,63 +21,51 @@ with st.sidebar:
 
     generate = st.button("Generate Plan")
 
-# ---------------- PROMPT ----------------
-def build_prompt():
-    return f"""
-You are a professional travel planner.
+# -------- LOGIC --------
+def generate_itinerary(city, days):
+    places = [
+        "Historic City Center",
+        "Famous Landmark",
+        "Local Market",
+        "Popular Museum",
+        "Scenic Neighborhood",
+        "Cultural District",
+        "Riverside Walk",
+        "Hidden Café Area",
+        "Art & Street Zone",
+        "Viewpoint / Hilltop"
+    ]
 
-Create a detailed, realistic travel itinerary.
+    itinerary = {}
 
-RULES:
-- DO NOT repeat the same activities every day
-- Mention REAL attractions, neighborhoods, or nearby places in {dest_city}
-- Each day MUST be different
-- Structure output EXACTLY in JSON
-- Costs should be realistic estimates in INR
-- Costs should scale for {people} people
+    for d in range(days):
+        place = places[d % len(places)]
+        itinerary[f"Day {d+1}"] = {
+            "Morning": f"Visit the {place} of {city}",
+            "Afternoon": f"Explore nearby attractions and local food spots in {city}",
+            "Evening": f"Relax, dine, or explore nightlife in {city}"
+        }
 
-TRIP DETAILS:
-From: {start_city}, {start_country}
-To: {dest_city}, {dest_country}
-Duration: {days} days
-People: {people}
+    return itinerary
 
-JSON FORMAT ONLY:
 
-{{
-  "itinerary": {{
-    "Day 1": {{
-      "Morning": "...",
-      "Afternoon": "...",
-      "Evening": "..."
-    }}
-  }},
-  "cost_estimate": {{
-    "Travel": number,
-    "Accommodation": number,
-    "Food & Activities": number
-  }}
-}}
-"""
+def estimate_cost(days, people):
+    cost = {
+        "Travel": 15000 * people,
+        "Stay": 4000 * days * people,
+        "Food & Activities": 2500 * days * people
+    }
+    return cost
 
-# ---------------- GENERATION ----------------
-def generate_plan():
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": build_prompt()}],
-        temperature=0.7
-    )
-    return json.loads(response.choices[0].message.content)
 
-# ---------------- OUTPUT ----------------
+# -------- OUTPUT --------
 if generate:
-    try:
-        data = generate_plan()
-        itinerary = data["itinerary"]
-        cost = data["cost_estimate"]
+    if not dest_city or not dest_country:
+        st.error("Please enter destination city and country.")
+    else:
+        st.subheader("🗓️ Day-wise Itinerary")
 
-        st.divider()
-        st.header("🗓️ Day-wise Itinerary")
+        itinerary = generate_itinerary(dest_city, days)
 
         for day, plan in itinerary.items():
             with st.expander(day, expanded=True):
@@ -91,32 +73,25 @@ if generate:
                 st.markdown(f"🌞 **Afternoon:** {plan['Afternoon']}")
                 st.markdown(f"🌙 **Evening:** {plan['Evening']}")
 
-        # ---------------- COST SUMMARY ----------------
-        st.divider()
-        st.header("💰 Cost Summary (Estimated)")
+        # -------- COST --------
+        st.subheader("💰 Cost Summary (Estimated)")
+        cost = estimate_cost(days, people)
 
-        total_cost = sum(cost.values())
+        total = sum(cost.values())
+        st.metric("Estimated Total Cost (INR)", f"₹{total:,}")
 
-        col1, col2 = st.columns([1, 1])
+        fig, ax = plt.subplots()
+        ax.bar(cost.keys(), cost.values())
+        ax.set_ylabel("INR")
+        ax.set_title("Cost Breakdown")
+        st.pyplot(fig)
 
-        with col1:
-            st.metric("Estimated Total Cost (INR)", f"₹{total_cost:,}")
-
-        with col2:
-            fig, ax = plt.subplots()
-            ax.bar(cost.keys(), cost.values())
-            ax.set_ylabel("Cost (INR)")
-            ax.set_title("Cost Breakdown")
-            st.pyplot(fig)
-
-        st.info(
-            "Costs vary based on season, booking time, and personal preferences.\n\n"
-            "• Travel: Flights / trains / buses\n"
-            "• Accommodation: Budget to mid-range hotels\n"
-            "• Food & Activities: Local dining & attractions"
+        # -------- MAP --------
+        st.subheader("🗺️ Travel Route")
+        map_url = (
+            f"https://www.google.com/maps/dir/"
+            f"{start_city},{start_country}/"
+            f"{dest_city},{dest_country}"
         )
-
-    except Exception as e:
-        st.error("Failed to generate plan. Please try again.")
-        st.exception(e)
+        st.markdown(f"[View Route on Google Maps]({map_url})")
 
