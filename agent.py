@@ -1,163 +1,110 @@
 import streamlit as st
-import pandas as pd
+import openai
+import matplotlib.pyplot as plt
 
-# ------------------ PAGE CONFIG ------------------
-st.set_page_config(
-    page_title="AI Travel Planning Agent",
-    page_icon="✈️",
-    layout="wide"
-)
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Travel Planner", layout="wide")
 
-# ------------------ SIDEBAR INPUTS ------------------
-st.sidebar.title("🧳 Trip Details")
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-start_country = st.sidebar.text_input("Starting Country")
-start_city = st.sidebar.text_input("Starting City")
-
-dest_country = st.sidebar.text_input("Destination Country")
-dest_city = st.sidebar.text_input("Destination City")
-
-days = st.sidebar.number_input(
-    "Trip Duration (Days)",
-    min_value=1,
-    max_value=30,
-    value=5,
-    step=1
-)
-
-people = st.sidebar.number_input(
-    "Number of People",
-    min_value=1,
-    max_value=10,
-    value=1,
-    step=1
-)
-
-generate = st.sidebar.button("Generate Plan")
-
-# ------------------ HEADER ------------------
+# ---------------- UI ----------------
 st.title("✈️ AI Travel Planning Agent")
-st.caption("Structured itinerary, cost estimation & route planning")
+st.caption("Generate realistic, day-wise travel itineraries")
 
-# ------------------ HELPER FUNCTIONS ------------------
-def generate_itinerary(city, days):
-    itinerary = {}
-    for d in range(1, days + 1):
-        itinerary[f"Day {d}"] = {
-            "Morning": f"Explore a major landmark or popular attraction in {city}.",
-            "Afternoon": f"Visit museums, cultural areas, or local neighborhoods in {city}.",
-            "Evening": f"Relax, dine locally, or enjoy nightlife in {city}."
-        }
-    return itinerary
+with st.sidebar:
+    st.header("Trip Details")
 
+    start_country = st.text_input("Starting Country")
+    start_city = st.text_input("Starting City")
 
-def estimate_cost(days, people):
-    return {
-        "Accommodation": days * 4500 * people,
-        "Food & Activities": days * 2500 * people,
-        "Travel": 30000 * people
-    }
+    dest_country = st.text_input("Destination Country")
+    dest_city = st.text_input("Destination City")
 
+    days = st.number_input("Trip Duration (Days)", min_value=1, max_value=30, value=3)
+    people = st.number_input("Number of Travelers", min_value=1, max_value=20, value=1)
 
-# ------------------ MAIN OUTPUT ------------------
-if generate:
+    generate = st.button("Generate Plan")
 
-    # ---------- VALIDATION ----------
-    if not all([start_country, start_city, dest_country, dest_city]):
-        st.error("⚠️ Please fill in all location fields.")
-        st.stop()
+# ---------------- PROMPT ----------------
+def build_prompt():
+    return f"""
+You are a professional travel planner.
 
-    st.success("✅ Travel plan generated successfully!")
+Create a realistic {days}-day itinerary for a trip from
+{start_city}, {start_country} to {dest_city}, {dest_country}
+for {people} travelers.
 
-    # ---------- DESTINATION OVERVIEW ----------
-    st.subheader("🌍 Destination Overview")
-    st.write(
-        f"You are traveling from **{start_city}, {start_country}** "
-        f"to **{dest_city}, {dest_country}** for **{days} days** "
-        f"with **{people} traveler(s)**."
-    )
+RULES (VERY IMPORTANT):
+- Every day must be DIFFERENT
+- Use REAL, SPECIFIC place names (monuments, streets, neighborhoods, attractions)
+- DO NOT repeat activities across days
+- DO NOT use generic phrases like "explore a landmark"
+- Structure EVERY day as:
 
-    # ---------- TRAVEL ROUTE ----------
-    st.subheader("🗺️ Travel Route")
+Day X:
+Morning:
+- specific places
 
-    origin = f"{start_city}, {start_country}".replace(" ", "+")
-    destination = f"{dest_city}, {dest_country}".replace(" ", "+")
+Afternoon:
+- specific places
 
-    map_url = (
-        "https://www.google.com/maps/dir/?api=1"
-        f"&origin={origin}&destination={destination}"
-    )
+Evening:
+- specific places
 
-    st.markdown(f"🔗 **View Route on Google Maps:** [Open Map]({map_url})")
+Also provide:
+1. A short "Travel Route" summary from start city to destination
+2. A realistic cost estimate split into:
+   - Travel
+   - Stay
+   - Food & Activities
 
-    map_df = pd.DataFrame({
-        "lat": [20.5937, 48.8566],
-        "lon": [78.9629, 2.3522]
-    })
-    st.map(map_df)
-
-    # ---------- ITINERARY ----------
-    st.subheader("📅 Day-wise Itinerary")
-
-    itinerary = generate_itinerary(dest_city, days)
-
-    for day, plan in itinerary.items():
-        with st.expander(day, expanded=True):
-            st.markdown(f"**🌅 Morning:** {plan['Morning']}")
-            st.markdown(f"**🌞 Afternoon:** {plan['Afternoon']}")
-            st.markdown(f"**🌙 Evening:** {plan['Evening']}")
-
-    # ---------- COST SUMMARY ----------
-    st.subheader("💰 Cost Summary (Estimated)")
-
-    cost = estimate_cost(days, people)
-    total_cost = sum(cost.values())
-
-    st.metric(
-        "Estimated Total Cost (INR)",
-        f"₹{total_cost:,}"
-    )
-
-    cost_df = pd.DataFrame({
-        "Category": cost.keys(),
-        "Cost (INR)": cost.values()
-    })
-
-    st.bar_chart(cost_df.set_index("Category"))
-
-    st.info(
-        "💡 Costs are estimated per person and depend on season, "
-        "travel mode, and accommodation preferences."
-    )
-
-    # ---------- DOWNLOAD ----------
-    report_text = f"""
-TRAVEL PLAN REPORT
-
-From: {start_city}, {start_country}
-To: {dest_city}, {dest_country}
-Duration: {days} days
-Number of People: {people}
-
-ITINERARY:
+Costs should be realistic for the destination country.
 """
 
-    for day, plan in itinerary.items():
-        report_text += f"\n{day}\n"
-        for k, v in plan.items():
-            report_text += f"- {k}: {v}\n"
+# ---------------- GENERATE ----------------
+if generate:
+    if not all([start_country, start_city, dest_country, dest_city]):
+        st.error("Please fill all location fields.")
+    else:
+        with st.spinner("Generating itinerary..."):
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": build_prompt()}],
+                temperature=0.8
+            )
 
-    report_text += "\nCOST ESTIMATE:\n"
-    for k, v in cost.items():
-        report_text += f"{k}: INR {v}\n"
+        text = response.choices[0].message.content
 
-    report_text += f"\nTOTAL: INR {total_cost}\n"
+        # ---------------- DISPLAY ----------------
+        st.subheader("🗺️ Travel Route")
+        st.write(f"{start_city}, {start_country} ➜ {dest_city}, {dest_country}")
 
-    st.download_button(
-        "⬇️ Download Trip Report",
-        report_text,
-        file_name="travel_plan.txt"
-    )
+        st.subheader("📅 Day-wise Itinerary")
 
-else:
-    st.info("👈 Enter trip details and click **Generate Plan**")
+        days_blocks = text.split("Day ")[1:]
+
+        for block in days_blocks:
+            day_title = block.split("\n")[0]
+            content = block[len(day_title):]
+
+            with st.expander(f"Day {day_title}", expanded=True):
+                st.markdown(content)
+
+        # ---------------- COST ESTIMATION ----------------
+        st.subheader("💰 Estimated Cost Summary")
+
+        travel_cost = 800 * people
+        stay_cost = 120 * days * people
+        food_cost = 60 * days * people
+
+        labels = ["Travel", "Stay", "Food & Activities"]
+        values = [travel_cost, stay_cost, food_cost]
+
+        fig, ax = plt.subplots()
+        ax.bar(labels, values)
+        ax.set_ylabel("Cost (USD)")
+        ax.set_title("Estimated Trip Cost")
+
+        st.pyplot(fig)
+
+        st.success("Trip plan generated successfully!")
