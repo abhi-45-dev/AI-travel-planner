@@ -1,16 +1,18 @@
 import streamlit as st
 import openai
+import json
 import matplotlib.pyplot as plt
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Travel Planner", layout="wide")
 
+st.title("✈️ AI Travel Planning Agent")
+st.caption("Generate realistic, city-specific travel itineraries with cost estimation")
+
+# Load OpenAI key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# ---------------- UI ----------------
-st.title("✈️ AI Travel Planning Agent")
-st.caption("Generate realistic, day-wise travel itineraries")
-
+# ---------------- INPUTS ----------------
 with st.sidebar:
     st.header("Trip Details")
 
@@ -20,8 +22,8 @@ with st.sidebar:
     dest_country = st.text_input("Destination Country")
     dest_city = st.text_input("Destination City")
 
-    days = st.number_input("Trip Duration (Days)", min_value=1, max_value=30, value=3)
-    people = st.number_input("Number of Travelers", min_value=1, max_value=20, value=1)
+    days = st.number_input("Trip Duration (Days)", min_value=1, max_value=30, value=5)
+    people = st.number_input("Number of People", min_value=1, max_value=10, value=1)
 
     generate = st.button("Generate Plan")
 
@@ -30,81 +32,91 @@ def build_prompt():
     return f"""
 You are a professional travel planner.
 
-Create a realistic {days}-day itinerary for a trip from
-{start_city}, {start_country} to {dest_city}, {dest_country}
-for {people} travelers.
+Create a detailed, realistic travel itinerary.
 
-RULES (VERY IMPORTANT):
-- Every day must be DIFFERENT
-- Use REAL, SPECIFIC place names (monuments, streets, neighborhoods, attractions)
-- DO NOT repeat activities across days
-- DO NOT use generic phrases like "explore a landmark"
-- Structure EVERY day as:
+RULES:
+- DO NOT repeat the same activities every day
+- Mention REAL attractions, neighborhoods, or nearby places in {dest_city}
+- Each day MUST be different
+- Structure output EXACTLY in JSON
+- Costs should be realistic estimates in INR
+- Costs should scale for {people} people
 
-Day X:
-Morning:
-- specific places
+TRIP DETAILS:
+From: {start_city}, {start_country}
+To: {dest_city}, {dest_country}
+Duration: {days} days
+People: {people}
 
-Afternoon:
-- specific places
+JSON FORMAT ONLY:
 
-Evening:
-- specific places
-
-Also provide:
-1. A short "Travel Route" summary from start city to destination
-2. A realistic cost estimate split into:
-   - Travel
-   - Stay
-   - Food & Activities
-
-Costs should be realistic for the destination country.
+{{
+  "itinerary": {{
+    "Day 1": {{
+      "Morning": "...",
+      "Afternoon": "...",
+      "Evening": "..."
+    }}
+  }},
+  "cost_estimate": {{
+    "Travel": number,
+    "Accommodation": number,
+    "Food & Activities": number
+  }}
+}}
 """
 
-# ---------------- GENERATE ----------------
+# ---------------- GENERATION ----------------
+def generate_plan():
+    response = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": build_prompt()}],
+        temperature=0.7
+    )
+    return json.loads(response.choices[0].message.content)
+
+# ---------------- OUTPUT ----------------
 if generate:
-    if not all([start_country, start_city, dest_country, dest_city]):
-        st.error("Please fill all location fields.")
-    else:
-        with st.spinner("Generating itinerary..."):
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": build_prompt()}],
-                temperature=0.8
-            )
+    try:
+        data = generate_plan()
+        itinerary = data["itinerary"]
+        cost = data["cost_estimate"]
 
-        text = response.choices[0].message.content
+        st.divider()
+        st.header("🗓️ Day-wise Itinerary")
 
-        # ---------------- DISPLAY ----------------
-        st.subheader("🗺️ Travel Route")
-        st.write(f"{start_city}, {start_country} ➜ {dest_city}, {dest_country}")
+        for day, plan in itinerary.items():
+            with st.expander(day, expanded=True):
+                st.markdown(f"🌅 **Morning:** {plan['Morning']}")
+                st.markdown(f"🌞 **Afternoon:** {plan['Afternoon']}")
+                st.markdown(f"🌙 **Evening:** {plan['Evening']}")
 
-        st.subheader("📅 Day-wise Itinerary")
+        # ---------------- COST SUMMARY ----------------
+        st.divider()
+        st.header("💰 Cost Summary (Estimated)")
 
-        days_blocks = text.split("Day ")[1:]
+        total_cost = sum(cost.values())
 
-        for block in days_blocks:
-            day_title = block.split("\n")[0]
-            content = block[len(day_title):]
+        col1, col2 = st.columns([1, 1])
 
-            with st.expander(f"Day {day_title}", expanded=True):
-                st.markdown(content)
+        with col1:
+            st.metric("Estimated Total Cost (INR)", f"₹{total_cost:,}")
 
-        # ---------------- COST ESTIMATION ----------------
-        st.subheader("💰 Estimated Cost Summary")
+        with col2:
+            fig, ax = plt.subplots()
+            ax.bar(cost.keys(), cost.values())
+            ax.set_ylabel("Cost (INR)")
+            ax.set_title("Cost Breakdown")
+            st.pyplot(fig)
 
-        travel_cost = 800 * people
-        stay_cost = 120 * days * people
-        food_cost = 60 * days * people
+        st.info(
+            "Costs vary based on season, booking time, and personal preferences.\n\n"
+            "• Travel: Flights / trains / buses\n"
+            "• Accommodation: Budget to mid-range hotels\n"
+            "• Food & Activities: Local dining & attractions"
+        )
 
-        labels = ["Travel", "Stay", "Food & Activities"]
-        values = [travel_cost, stay_cost, food_cost]
+    except Exception as e:
+        st.error("Failed to generate plan. Please try again.")
+        st.exception(e)
 
-        fig, ax = plt.subplots()
-        ax.bar(labels, values)
-        ax.set_ylabel("Cost (USD)")
-        ax.set_title("Estimated Trip Cost")
-
-        st.pyplot(fig)
-
-        st.success("Trip plan generated successfully!")
